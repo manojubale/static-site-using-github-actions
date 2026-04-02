@@ -27,7 +27,7 @@ resource "aws_s3_bucket_public_access_block" "block" {
 
 # ✅ CloudFront Origin Access Control (OAC)
 resource "aws_cloudfront_origin_access_control" "oac" {
-  name                              = "s3-oac"
+  name                              = "s3-oac-${random_id.bucket_id.hex}"
   description                       = "OAC for S3"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
