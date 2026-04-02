@@ -2,51 +2,47 @@ provider "aws" {
   region = "us-east-2"
 }
 
-# ✅ S3 Bucket
-resource "aws_s3_bucket" "site" {
-  bucket = "github-actions-bucket-for-static-website-new"
+# ✅ Generate unique bucket name
+resource "random_id" "bucket_id" {
+  byte_length = 4
 }
 
-# ✅ Public access settings
+# ✅ S3 Bucket
+resource "aws_s3_bucket" "site" {
+  bucket = "manoj-static-site-${random_id.bucket_id.hex}"
+}
+
+# ✅ Block ALL public access (secure)
 resource "aws_s3_bucket_public_access_block" "block" {
   bucket = aws_s3_bucket.site.id
 
-  block_public_acls   = false
-  block_public_policy = false
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
-# ✅ Website config
-resource "aws_s3_bucket_website_configuration" "website" {
-  bucket = aws_s3_bucket.site.id
+# ❌ REMOVE bucket policy (IMPORTANT)
+# ❌ REMOVE aws_s3_bucket_website_configuration
 
-  index_document {
-    suffix = "index.html"
-  }
+# ✅ CloudFront Origin Access Control (OAC)
+resource "aws_cloudfront_origin_access_control" "oac" {
+  name                              = "s3-oac"
+  description                       = "OAC for S3"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
 }
 
-# ✅ Bucket policy
-resource "aws_s3_bucket_policy" "policy" {
-  bucket = aws_s3_bucket.site.id
-
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Principal = "*",
-      Action = "s3:GetObject",
-      Resource = "${aws_s3_bucket.site.arn}/*"
-    }]
-  })
-}
-
-# ✅ CloudFront
+# ✅ CloudFront Distribution
 resource "aws_cloudfront_distribution" "cdn" {
   origin {
-    domain_name = aws_s3_bucket.site.bucket_regional_domain_name
-    origin_id   = "s3-origin"
+    domain_name              = aws_s3_bucket.site.bucket_regional_domain_name
+    origin_id                = "s3-origin"
+    origin_access_control_id = aws_cloudfront_origin_access_control.oac.id
   }
 
-  enabled = true
+  enabled             = true
   default_root_object = "index.html"
 
   default_cache_behavior {
@@ -56,13 +52,7 @@ resource "aws_cloudfront_distribution" "cdn" {
     allowed_methods = ["GET", "HEAD"]
     cached_methods  = ["GET", "HEAD"]
 
-    forwarded_values {
-      query_string = false
-
-      cookies {
-        forward = "none"
-      }
-    }
+    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   }
 
   viewer_certificate {
@@ -74,4 +64,26 @@ resource "aws_cloudfront_distribution" "cdn" {
       restriction_type = "none"
     }
   }
+}
+
+# ✅ Allow CloudFront to access S3 (IMPORTANT)
+resource "aws_s3_bucket_policy" "policy" {
+  bucket = aws_s3_bucket.site.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = {
+        Service = "cloudfront.amazonaws.com"
+      },
+      Action   = "s3:GetObject",
+      Resource = "${aws_s3_bucket.site.arn}/*",
+      Condition = {
+        StringEquals = {
+          "AWS:SourceArn" = aws_cloudfront_distribution.cdn.arn
+        }
+      }
+    }]
+  })
 }
